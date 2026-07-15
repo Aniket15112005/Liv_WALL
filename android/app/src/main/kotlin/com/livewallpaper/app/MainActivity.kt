@@ -19,23 +19,35 @@ class MainActivity : FlutterActivity() {
             CHANNEL
         ).setMethodCallHandler { call, result ->
             when (call.method) {
-                "applyWallpaper" -> {
-                    val wallpaperId = call.argument<String>("wallpaperId") ?: ""
-                    val wallpaperType = call.argument<Int>("wallpaperType") ?: 0
-                    val colors = call.argument<List<Int>>("colors") ?: emptyList()
-
-                    // Store wallpaper settings for the service to read
-                    WallpaperSettings.wallpaperId = wallpaperId
-                    WallpaperSettings.wallpaperType = wallpaperType
-                    WallpaperSettings.colors = colors
+                // Stores the processed video's path, then hands off to the
+                // system's "set live wallpaper" flow. Android requires the
+                // user to confirm this themselves in a system dialog — no
+                // app is allowed to silently set a live wallpaper.
+                "setLiveWallpaper" -> {
+                    val path = call.argument<String>("path")
+                    if (path.isNullOrEmpty()) {
+                        result.error("INVALID_ARGUMENT", "Missing video path", null)
+                        return@setMethodCallHandler
+                    }
 
                     try {
+                        WallpaperPrefs.setActiveVideoPath(this@MainActivity, path)
+
+                        // Nudge an already-running instance of our wallpaper
+                        // (if the user is switching clips without leaving
+                        // the home screen) to reload immediately.
+                        sendBroadcast(
+                            Intent(VideoWallpaperService.ACTION_RELOAD_WALLPAPER).apply {
+                                setPackage(packageName)
+                            }
+                        )
+
                         val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
                             putExtra(
                                 WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
                                 ComponentName(
                                     this@MainActivity,
-                                    LiveWallpaperService::class.java
+                                    VideoWallpaperService::class.java
                                 )
                             )
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -47,41 +59,32 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
-                "isWallpaperServiceEnabled" -> {
+                // Compares the currently active system wallpaper service
+                // against ours, so the Flutter UI can tell if what's on the
+                // home screen right now was actually set by this app.
+                "isLiveWallpaperActive" -> {
                     try {
                         val wallpaperManager = WallpaperManager.getInstance(this)
-                        val isLiveWallpaper = wallpaperManager.wallpaperInfo != null
-                        result.success(isLiveWallpaper)
+                        val info = wallpaperManager.wallpaperInfo
+                        val isOurs = info != null &&
+                            info.serviceName == VideoWallpaperService::class.java.name
+                        result.success(isOurs)
                     } catch (e: Exception) {
                         result.success(false)
                     }
                 }
 
-                "openWallpaperPicker" -> {
+                // Clears our stored active video and reverts the home
+                // screen to the system default wallpaper. This is the only
+                // OS-sanctioned way to remove a live wallpaper — there is
+                // no way to do this without going through WallpaperManager.
+                "clearLiveWallpaper" -> {
                     try {
-                        val intent = Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        startActivity(intent)
-                        result.success(null)
+                        WallpaperPrefs.clear(this@MainActivity)
+                        WallpaperManager.getInstance(this).clear()
+                        result.success(true)
                     } catch (e: Exception) {
-                        // Fallback to live wallpaper list
-                        try {
-                            val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
-                                putExtra(
-                                    WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-                                    ComponentName(
-                                        this@MainActivity,
-                                        LiveWallpaperService::class.java
-                                    )
-                                )
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            startActivity(intent)
-                            result.success(null)
-                        } catch (ex: Exception) {
-                            result.error("PICKER_ERROR", ex.message, null)
-                        }
+                        result.error("CLEAR_ERROR", e.message, null)
                     }
                 }
 
@@ -89,11 +92,4 @@ class MainActivity : FlutterActivity() {
             }
         }
     }
-}
-
-// Singleton to pass settings from Flutter to the WallpaperService
-object WallpaperSettings {
-    var wallpaperId: String = "particles_blue"
-    var wallpaperType: Int = 0
-    var colors: List<Int> = listOf(0xFF0D47A1.toInt(), 0xFF1565C0.toInt(), 0xFF42A5F5.toInt())
 }

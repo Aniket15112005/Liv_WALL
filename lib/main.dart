@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'screens/home_screen.dart';
-import 'services/wallpaper_service.dart';
+import 'services/video_wallpaper_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,7 +15,7 @@ void main() {
   );
   runApp(
     ChangeNotifierProvider(
-      create: (_) => WallpaperService(),
+      create: (_) => VideoWallpaperService(),
       child: const LiveWallpaperApp(),
     ),
   );

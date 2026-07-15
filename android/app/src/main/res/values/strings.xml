@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Live Wallpapers</string>
-    <string name="wallpaper_label">Live Wallpapers</string>
-    <string name="wallpaper_description">Beautiful animated live wallpapers for your home screen</string>
+    <string name="wallpaper_label">My Video Wallpaper</string>
+    <string name="wallpaper_description">Plays your chosen video as a live home screen wallpaper</string>
 </resources>
