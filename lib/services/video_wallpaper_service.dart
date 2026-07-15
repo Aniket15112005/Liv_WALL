@@ -191,9 +191,15 @@ class VideoWallpaperService extends ChangeNotifier {
       case WallpaperQuality.dataSaver:
         return VideoQuality.LowQuality;
       case WallpaperQuality.balanced:
-        return VideoQuality.MediumQuality;
-      case WallpaperQuality.best:
         return VideoQuality.Res1280x720Quality;
+      case WallpaperQuality.best:
+        // Res1920x1080Quality forces a resize step that fails on many
+        // Android hardware encoders for portrait clips (this is what was
+        // causing "Could not process that video"). HighestQuality instead
+        // keeps the video's ORIGINAL resolution untouched and only caps
+        // the bitrate, which avoids the resize step entirely and is far
+        // more reliable across devices, including the GT Neo 3.
+        return VideoQuality.HighestQuality;
     }
   }
 
