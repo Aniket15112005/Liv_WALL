@@ -46,6 +46,11 @@ class _VideoDetailScreenState extends State<VideoDetailScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A1A),
+      // Prevent the scaffold body from shrinking when a keyboard is visible
+      // (e.g. after dismissing the rename dialog on a previous screen).
+      // Without this, the Stack collapses and the Positioned(bottom: 0)
+      // bottom panel ends up overlapping the top buttons.
+      resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
           Positioned.fill(
@@ -148,44 +153,47 @@ class _VideoDetailScreenState extends State<VideoDetailScreen> {
   Widget _buildBottomPanel(
       BuildContext context, VideoWallpaperService service, bool isActive) {
     final w = widget.wallpaper;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Colors.transparent, Colors.black.withOpacity(0.95)],
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.transparent, Colors.black.withOpacity(0.95)],
+          ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            w.title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 26,
-              fontWeight: FontWeight.bold,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              w.title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '${w.formattedDuration} · ${w.formattedSize}',
-            style: const TextStyle(color: Colors.white60, fontSize: 13),
-          ),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              if (isActive)
-                Expanded(child: _buildRemoveButton(service))
-              else
-                Expanded(child: _buildApplyButton(service)),
-              const SizedBox(width: 12),
-              _buildDeleteButton(context, service),
-            ],
-          ),
-        ],
+            const SizedBox(height: 6),
+            Text(
+              '${w.formattedDuration} · ${w.formattedSize}',
+              style: const TextStyle(color: Colors.white60, fontSize: 13),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                if (isActive)
+                  Expanded(child: _buildRemoveButton(service))
+                else
+                  Expanded(child: _buildApplyButton(service)),
+                const SizedBox(width: 12),
+                _buildDeleteButton(context, service),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

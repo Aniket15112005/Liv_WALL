@@ -5,11 +5,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
+import android.os.Handler
+import android.os.HandlerThread
 import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import java.io.File
 
 /**
  * Renders the user's chosen video as a live home screen wallpaper.
@@ -20,6 +23,11 @@ import androidx.media3.exoplayer.ExoPlayer
  * Surface. That mode scales+crops the video to fully cover the surface
  * (like CSS `background-size: cover`), so a single processed clip always
  * fills the screen sharply regardless of the device's screen ratio.
+ *
+ * ExoPlayer is intentionally created on a dedicated background thread
+ * (playerThread) so that its initialisation — which sets up codec renderers,
+ * audio sessions and internal handler threads — never blocks the app's main
+ * thread and cannot trigger an ANR.
  */
 @UnstableApi
 class VideoWallpaperService : WallpaperService() {
@@ -31,14 +39,22 @@ class VideoWallpaperService : WallpaperService() {
         private var currentPath: String? = null
         private var reloadReceiver: BroadcastReceiver? = null
 
+        // Dedicated background thread for all ExoPlayer operations.
+        private val playerThread = HandlerThread("VideoWallpaperThread")
+        private lateinit var playerHandler: Handler
+
         override fun onCreate(surfaceHolder: SurfaceHolder) {
             super.onCreate(surfaceHolder)
+            playerThread.start()
+            playerHandler = Handler(playerThread.looper)
             registerReloadReceiver()
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
             super.onSurfaceCreated(holder)
-            startOrReloadPlayer(holder)
+            // Post to background thread so ExoPlayer init never blocks the
+            // main thread while Android is waiting for a UI response.
+            playerHandler.post { startOrReloadPlayer(holder) }
         }
 
         override fun onSurfaceChanged(
@@ -48,26 +64,26 @@ class VideoWallpaperService : WallpaperService() {
             height: Int
         ) {
             super.onSurfaceChanged(holder, format, width, height)
-            player?.setVideoSurfaceHolder(holder)
+            playerHandler.post { player?.setVideoSurfaceHolder(holder) }
         }
 
         override fun onSurfaceDestroyed(holder: SurfaceHolder) {
             super.onSurfaceDestroyed(holder)
-            releasePlayer()
+            playerHandler.post { releasePlayer() }
         }
 
         override fun onVisibilityChanged(visible: Boolean) {
             super.onVisibilityChanged(visible)
-            if (visible) {
-                player?.play()
-            } else {
-                player?.pause()
+            playerHandler.post {
+                if (visible) player?.play() else player?.pause()
             }
         }
 
         override fun onDestroy() {
             super.onDestroy()
-            releasePlayer()
+            // Release player on the player thread, then shut the thread down.
+            playerHandler.post { releasePlayer() }
+            playerThread.quitSafely()
             reloadReceiver?.let {
                 try {
                     unregisterReceiver(it)
@@ -78,6 +94,9 @@ class VideoWallpaperService : WallpaperService() {
             reloadReceiver = null
         }
 
+        /**
+         * Must only be called from [playerHandler] (i.e. on [playerThread]).
+         */
         private fun startOrReloadPlayer(holder: SurfaceHolder) {
             val path = WallpaperPrefs.getActiveVideoPath(this@VideoWallpaperService)
             if (path.isNullOrEmpty()) {
@@ -92,18 +111,26 @@ class VideoWallpaperService : WallpaperService() {
             releasePlayer()
             currentPath = path
 
-            val exoPlayer = ExoPlayer.Builder(this@VideoWallpaperService).build().apply {
-                setVideoSurfaceHolder(holder)
-                videoScalingMode = androidx.media3.common.C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
-                repeatMode = androidx.media3.common.Player.REPEAT_MODE_ALL
-                volume = 0f
-                setMediaItem(MediaItem.fromUri(Uri.fromFile(java.io.File(path))))
-                prepare()
-                playWhenReady = isVisible
-            }
+            // Build ExoPlayer with the background looper so all its internal
+            // callbacks stay off the main thread.
+            val exoPlayer = ExoPlayer.Builder(this@VideoWallpaperService)
+                .setLooper(playerThread.looper)
+                .build().apply {
+                    setVideoSurfaceHolder(holder)
+                    videoScalingMode =
+                        androidx.media3.common.C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+                    repeatMode = androidx.media3.common.Player.REPEAT_MODE_ALL
+                    volume = 0f
+                    setMediaItem(MediaItem.fromUri(Uri.fromFile(File(path))))
+                    prepare()
+                    playWhenReady = isVisible
+                }
             player = exoPlayer
         }
 
+        /**
+         * Must only be called from [playerHandler].
+         */
         private fun releasePlayer() {
             player?.release()
             player = null
@@ -116,7 +143,10 @@ class VideoWallpaperService : WallpaperService() {
         private fun registerReloadReceiver() {
             val receiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context?, intent: Intent?) {
-                    surfaceHolder?.let { startOrReloadPlayer(it) }
+                    // onReceive runs on the main thread; post player work to
+                    // the dedicated player thread.
+                    val holder = surfaceHolder ?: return
+                    playerHandler.post { startOrReloadPlayer(holder) }
                 }
             }
             registerReceiver(
